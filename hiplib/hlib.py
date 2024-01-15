@@ -166,6 +166,14 @@ class HIPLib():
         if self.config["general"]["rekey_after_packets"] > ((2<<32)-1):
             self.config["general"]["rekey_after_packets"] = (2<<32)-1;
 
+    def get_own_hit(self):
+        return self.own_hit;
+
+    def reload_config(self):
+        self.firewall.load_rules(self.config["firewall"]["rules_file"])
+        logging.info("Using hosts file to resolve HITS %s" % (self.config["resolver"]["hosts_file"]));
+        self.hit_resolver.load_records(filename = self.config["resolver"]["hosts_file"]);
+        
     def process_hip_packet(self, packet):
         try:
             response = [];
@@ -188,6 +196,10 @@ class HIPLib():
 
             ihit = hip_packet.get_senders_hit();
             rhit = hip_packet.get_receivers_hit();
+
+            if not self.firewall.allow(Utils.ipv6_bytes_to_hex_formatted_resolver(ihit), Utils.ipv6_bytes_to_hex_formatted_resolver(rhit)):
+                logging.critical("Blocked by firewall...")
+                return [];
 
             #logging.info("Got HIP packet");
             #logging.info("Responder's HIT %s" % Utils.ipv6_bytes_to_hex_formatted(rhit));
@@ -232,7 +244,7 @@ class HIPLib():
             if hip_packet.get_packet_type() == HIP.HIP_I1_PACKET:
                 logging.info("I1 packet");
 
-                if not self.firewall.allow(Utils.ipv6_bytes_to_hex_formatted(ihit), Utils.ipv6_bytes_to_hex_formatted(rhit)):
+                if not self.firewall.allow(Utils.ipv6_bytes_to_hex_formatted_resolver(ihit), Utils.ipv6_bytes_to_hex_formatted_resolver(rhit)):
                     logging.critical("Blocked by firewall...")
                     return [];
 
@@ -419,7 +431,7 @@ class HIPLib():
                 # Stay in current state
             elif hip_packet.get_packet_type() == HIP.HIP_R1_PACKET:
                 logging.info("R1 packet");
-
+            
                 # 1 0 1
                 # 1 1 1
                 if (hip_state.is_unassociated() 
@@ -429,6 +441,7 @@ class HIPLib():
                     return;
 
                 oga = HIT.get_responders_oga_id(ihit);
+                
 
                 if (oga << 4) not in self.config["security"]["supported_hit_suits"]:
                     logging.critical("Unsupported HIT suit");
@@ -490,13 +503,22 @@ class HIPLib():
                         # Check the algorithm and construct the HI based on the proposed algorithm
                         if hi_param.get_algorithm() == 0x5: #RSA
                             responder_hi = RSAHostID.from_byte_buffer(hi_param.get_host_id());
+                            repsonder_hit_calculated = HIT.get(responder_hi.to_byte_array(), HIT.SHA256_OGA)
                         elif hi_param.get_algorithm() == 0x7: #ECDSA
                             responder_hi = ECDSAHostID.from_byte_buffer(hi_param.get_host_id());
+                            repsonder_hit_calculated = HIT.get(responder_hi.to_byte_array(), HIT.SHA384_OGA)
                         elif hi_param.get_algorithm() == 0x9: #ECDSA LOW
                             responder_hi = ECDSALowHostID.from_byte_buffer(hi_param.get_host_id());
+                            repsonder_hit_calculated = HIT.get(responder_hi.to_byte_array(), HIT.SHA1_OGA)
                         else:
                             raise Exception("Invalid signature algorithm");
-
+                        
+                        # Calculate to make firewall verification secure...
+                        if ihit != repsonder_hit_calculated:
+                            raise Exception("Invalid source HIT")
+                        if rhit != self.own_hit:
+                            raise Exception("Invalid destination HIT")
+                            
                         oga = HIT.get_responders_oga_id(ihit);
                         logging.debug("Responder's OGA ID %d" % (oga));
                         logging.debug(bytearray(responder_hi.to_byte_array()));
@@ -991,6 +1013,12 @@ class HIPLib():
                         oga = HIT.get_responders_oga_id(ihit);
                         logging.debug("OGA ID %d " % (oga));
                         responders_hit = HIT.get(responder_hi.to_byte_array(), oga);
+
+                        if ihit != responders_hit:
+                            raise Exception("Invalid source HIT")
+                        if rhit != self.own_hit:
+                            raise Exception("Invalid destination HIT")
+                        
                         logging.debug(list(rhit));
                         logging.debug(list(ihit));
                         logging.debug(list(responders_hit));
@@ -2055,6 +2083,8 @@ class HIPLib():
             #logging.debug("Got packet from %s to %s of %d bytes" % (src_str, dst_str, len(buf)));
             # Get SA record and construct the ESP payload
             sa_record   = self.ip_sec_sa.get_record(src_str, dst_str);
+            if not sa_record:
+                return None 
             hmac_alg    = sa_record.get_hmac_alg();
             cipher      = sa_record.get_aes_alg();
             hmac_key    = sa_record.get_hmac_key();

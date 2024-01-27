@@ -156,7 +156,11 @@ class HIPLib():
         #logging.debug("Configuring state machine and storage");
         self.hip_state_machine = HIPState.StateMachine();
         self.keymat_storage    = HIPState.Storage();
-        self.dh_storage        = HIPState.Storage();
+        self.dh_storage        = {}
+        self.dh_storage_I2     = HIPState.Storage();
+        self.dh_storage_R1     = HIPState.Storage();
+        self.j_storage         = HIPState.Storage();
+        self.i_storage         = HIPState.Storage();
         self.cipher_storage    = HIPState.Storage();
         self.pubkey_storage    = HIPState.Storage();
         self.state_variables   = HIPState.Storage();
@@ -183,6 +187,9 @@ class HIPLib():
 
             src = ipv4_packet.get_source_address();
             dst = ipv4_packet.get_destination_address();
+
+            dst_str = Utils.ipv4_bytes_to_string(dst);
+            src_str = Utils.ipv4_bytes_to_string(src);
 
             if ipv4_packet.get_protocol() != HIP.HIP_PROTOCOL:
                 logging.debug("Invalid protocol type");
@@ -251,17 +258,50 @@ class HIPLib():
                 if hip_state.is_i1_sent() and Utils.is_hit_smaller(rhit, ihit):
                     logging.debug("Staying in I1-SENT state");
                     return [];
+            
+                logging.debug(">>>>>>>>>>>>>>>>>>>> STATE >>>>>>>>>>> %d" % hip_state.get_state())
 
+                sv = None
+                
                 if Utils.is_hit_smaller(rhit, ihit):
-                    self.state_variables.save(Utils.ipv6_bytes_to_hex_formatted(rhit),
-                        Utils.ipv6_bytes_to_hex_formatted(ihit),
-                        HIPState.StateVariables(hip_state.get_state(), ihit, rhit, dst, src))
+                    sv = self.state_variables.get(Utils.ipv6_bytes_to_hex_formatted(rhit),
+                            Utils.ipv6_bytes_to_hex_formatted(ihit))
+                    
+                    if not sv:
+                        sv = HIPState.StateVariables(hip_state.get_state(), ihit, rhit, dst, src)
+                     
+                        self.state_variables.save(Utils.ipv6_bytes_to_hex_formatted(rhit),
+                            Utils.ipv6_bytes_to_hex_formatted(ihit),
+                            sv)
+                        sv.is_responder = True;
+                        sv.ihit = ihit;
+                        sv.rhit = rhit;
+                    else:
+                        sv.state = hip_state.get_state()
+                        sv.is_responder = True;
+                        sv.ihit = ihit;
+                        sv.rhit = rhit;
                 else:
-                    self.state_variables.save(Utils.ipv6_bytes_to_hex_formatted(ihit),
-                        Utils.ipv6_bytes_to_hex_formatted(rhit),
-                        HIPState.StateVariables(hip_state.get_state(), ihit, rhit, dst, src))
+                    sv = self.state_variables.get(Utils.ipv6_bytes_to_hex_formatted(ihit),
+                            Utils.ipv6_bytes_to_hex_formatted(rhit))
+                            
+                    if not sv:
+                        sv = HIPState.StateVariables(hip_state.get_state(), ihit, rhit, dst, src)
+                        self.state_variables.save(Utils.ipv6_bytes_to_hex_formatted(ihit),
+                            Utils.ipv6_bytes_to_hex_formatted(rhit),
+                            sv)
+                        sv.is_responder = True;
+                        sv.ihit = ihit;
+                        sv.rhit = rhit;
+                    else:
+                        sv.state = hip_state.get_state()
+                        sv.is_responder = True;
+                        sv.ihit = ihit;
+                        sv.rhit = rhit;
 
                 #st = time.time();
+
+                logging.debug("CHANGING I1 %d %s %s" % (sv.is_responder, Utils.ipv6_bytes_to_hex_formatted(ihit), Utils.ipv6_bytes_to_hex_formatted(rhit)))
                 
                 # Check the state of the HIP protocol
                 # R1 packet should be constructed only 
@@ -276,6 +316,11 @@ class HIPLib():
                 hip_r1_packet.set_version(HIP.HIP_VERSION);
 
                 r_hash = HIT.get_responders_hash_algorithm(rhit);
+
+                # R1 Counter 
+                r1counter_param = HIP.R1CounterParameter()
+                sv.r1_counter += 1
+                r1counter_param.set_counter(sv.r1_counter)
 
                 # Prepare puzzle
                 irandom = PuzzleSolver.generate_irandom(r_hash.LENGTH);
@@ -307,17 +352,36 @@ class HIPLib():
                         break;
                 if not selected_dh_group:
                     logging.debug("Unsupported DH group");
-                    return;
+                    return [];
 
                 dh = factory.DHFactory.get(selected_dh_group);
                 private_key = dh.generate_private_key();
                 public_key = dh.generate_public_key();
-                if Utils.is_hit_smaller(rhit, ihit):
-                    self.dh_storage.save(Utils.ipv6_bytes_to_hex_formatted(rhit), 
-                        Utils.ipv6_bytes_to_hex_formatted(ihit), dh);
-                else:
-                    self.dh_storage.save(Utils.ipv6_bytes_to_hex_formatted(ihit), 
-                        Utils.ipv6_bytes_to_hex_formatted(rhit), dh);
+                logging.debug("I1 -> R1 DH PUBLIC KEY ---------------------")
+                logging.debug(public_key)
+                logging.debug("I1 -> R1 DH PRIVATE KEY ---------------------")
+                logging.debug(private_key)
+
+                if not self.dh_storage.get(r1counter_param.get_counter(), None):
+                    self.dh_storage[r1counter_param.get_counter()] = HIPState.Storage()
+                 
+                #if Utils.is_hit_smaller(rhit, ihit):
+                logging.debug("**********************************************")
+                logging.debug("**********************************************")
+                logging.debug("**********************************************")
+                logging.debug("**********************************************")
+                logging.debug(r1counter_param.get_counter())
+                logging.debug("**********************************************")
+                logging.debug("**********************************************")
+                logging.debug("**********************************************")
+                logging.debug("**********************************************")
+                self.dh_storage[r1counter_param.get_counter()].save(Utils.ipv6_bytes_to_hex_formatted(ihit), 
+                    Utils.ipv6_bytes_to_hex_formatted(rhit), dh);
+                #else:
+                #    self.dh_storage[r1counter_param.get_counter()].save(Utils.ipv6_bytes_to_hex_formatted(ihit), 
+                #        Utils.ipv6_bytes_to_hex_formatted(rhit), dh);
+                
+                logging.debug("SAVING DH STORAGE ----------------- I1 PACKET (%s, %s)" % (src_str, dst_str))
                 
 
                 dh_param = HIP.DHParameter();
@@ -326,6 +390,8 @@ class HIPLib():
                 dh_param.add_public_value(dh.encode_public_key());
                 logging.debug("DH public key value: %d ", Math.bytes_to_int(dh.encode_public_key()));
                 logging.debug("DH public key value: %d ", Math.bytes_to_int(dh_param.get_public_value()));
+                logging.debug(dh_param.get_public_value())
+                logging.debug("R1 COUNTER ------------- %d", r1counter_param.get_counter());
 
                 # HIP cipher parameter
                 cipher_param = HIP.CipherParameter();
@@ -355,7 +421,8 @@ class HIPLib():
                 #
 
                 # Compute signature here
-                buf = puzzle_param.get_byte_buffer() + \
+                buf = r1counter_param.get_byte_buffer() + \
+                        puzzle_param.get_byte_buffer() + \
                         dh_param.get_byte_buffer() + \
                         cipher_param.get_byte_buffer() + \
                         esp_transform_param.get_byte_buffer() + \
@@ -383,8 +450,10 @@ class HIPLib():
                 # Add parameters to R1 packet (order is important)
                 hip_r1_packet.set_length(HIP.HIP_DEFAULT_PACKET_LENGTH);
                 # List of mandatory parameters in R1 packet...
+                
                 puzzle_param.set_random(irandom, r_hash.LENGTH);
                 puzzle_param.set_opaque(bytearray(Utils.generate_random(2)));
+                hip_r1_packet.add_parameter(r1counter_param);
                 hip_r1_packet.add_parameter(puzzle_param);
                 hip_r1_packet.add_parameter(dh_param);
                 hip_r1_packet.add_parameter(cipher_param);
@@ -430,15 +499,58 @@ class HIPLib():
                 response.append((bytearray(ipv4_packet.get_buffer()), (dst_str.strip(), 0)))
                 # Stay in current state
             elif hip_packet.get_packet_type() == HIP.HIP_R1_PACKET:
-                logging.info("R1 packet");
-            
+                logging.info("----------------------------- R1 packet ----------------------------- ");
+                
                 # 1 0 1
                 # 1 1 1
                 if (hip_state.is_unassociated() 
                     or hip_state.is_r2_sent() 
-                    or hip_state.is_established()):
-                    logging.debug("Dropping packet...");
-                    return;
+                    or hip_state.is_established()
+                    #or hip_state.is_closing()
+                    #or hip_state.is_closed()
+                    or hip_state.is_failed()):
+                    logging.debug("Dropping packet... Invalid state");
+                    return [];
+
+                if Utils.is_hit_smaller(rhit, ihit):
+                    sv = self.state_variables.get(Utils.ipv6_bytes_to_hex_formatted(rhit),
+                            Utils.ipv6_bytes_to_hex_formatted(ihit))
+                    
+                    if not sv:
+                        sv = HIPState.StateVariables(hip_state.get_state(), rhit, ihit, dst, src)
+                     
+                        self.state_variables.save(Utils.ipv6_bytes_to_hex_formatted(rhit),
+                            Utils.ipv6_bytes_to_hex_formatted(ihit),
+                            sv)
+                        sv.is_responder = False;
+                        sv.ihit = rhit;
+                        sv.rhit = ihit;
+                    else:
+                        sv.state = hip_state.get_state()
+                        sv.is_responder = False;
+                        sv.ihit = rhit;
+                        sv.rhit = ihit;
+                else:
+                    sv = self.state_variables.get(Utils.ipv6_bytes_to_hex_formatted(ihit),
+                            Utils.ipv6_bytes_to_hex_formatted(rhit))
+                            
+                    if not sv:
+                        sv = HIPState.StateVariables(hip_state.get_state(), rhit, ihit, dst, src)
+                        self.state_variables.save(Utils.ipv6_bytes_to_hex_formatted(ihit),
+                            Utils.ipv6_bytes_to_hex_formatted(rhit),
+                            sv)
+                        sv.is_responder = False;
+                        sv.ihit = rhit;
+                        sv.rhit = ihit;
+                    else:
+                        sv.state = hip_state.get_state()
+                        sv.is_responder = False;
+                        sv.ihit = rhit;
+                        sv.rhit = ihit;
+
+
+                #logging.debug("CHANGING %d " % sv.is_responder)
+                logging.debug("CHANGING R1 %d %s %s" % (sv.is_responder, Utils.ipv6_bytes_to_hex_formatted(ihit), Utils.ipv6_bytes_to_hex_formatted(rhit)))
 
                 oga = HIT.get_responders_oga_id(ihit);
                 
@@ -448,7 +560,7 @@ class HIPLib():
                     logging.critical("OGA %d"  % (oga));
                     logging.critical(self.config["security"]["supported_hit_suits"]);
                     # Send I1
-                    return;
+                    return [];
 
                 puzzle_param       = None;
                 r1_counter_param   = None;
@@ -477,6 +589,8 @@ class HIPLib():
 
                 r_hash = HIT.get_responders_hash_algorithm(ihit);
                 logging.debug(r_hash);
+                logging.debug(parameters)
+                logging.debug("!!!!!!!!!!!!!!!!!!!!!!")
 
                 for parameter in parameters:
                     if isinstance(parameter, HIP.DHGroupListParameter):
@@ -661,10 +775,10 @@ class HIPLib():
 
                 if not signature_alg.verify(signature_param.get_signature(), bytearray(buf)):
                     logging.critical("Invalid signature in R1 packet. Dropping the packet");
-                    return;
+                    return [];
                 
                 logging.debug("DH public key value: %d ", Math.bytes_to_int(dh_param.get_public_value()));
-                
+
                 offered_dh_groups = dh_groups_param.get_groups();
                 supported_dh_groups = self.config["security"]["supported_DH_groups"];
                 selected_dh_group = None;
@@ -683,16 +797,46 @@ class HIPLib():
                 public_key_r = dh.decode_public_key(dh_param.get_public_value());
                 shared_secret = dh.compute_shared_secret(public_key_r);
 
+                logging.debug("---------------------&&&&&&&&&&&&--------------")
                 logging.debug("Secret key %d" % shared_secret);
+                logging.debug("Secret key %d %s %s" % (shared_secret, src_str, dst_str));
+                logging.debug("R1 PACKET R1 COUNTER ------------- %d", r1_counter_param.get_counter());
+                logging.debug("SENDER %s, %s" % (src_str, dst_str))
+                logging.debug("R1 -> I2 DH PUBLIC KEY ---------------------")
+                logging.debug(dh_param.get_public_value())
+                logging.debug(public_key_i)
+                logging.debug("++++++++++++++++++++++++++++++++++++++++++++")
 
-                if Utils.is_hit_smaller(rhit, ihit):
-                    self.dh_storage.save(Utils.ipv6_bytes_to_hex_formatted(rhit), 
-                        Utils.ipv6_bytes_to_hex_formatted(ihit), dh);
-                else:
-                    self.dh_storage.save(Utils.ipv6_bytes_to_hex_formatted(ihit), 
-                        Utils.ipv6_bytes_to_hex_formatted(rhit), dh);
+                logging.debug("000000000000000000000000000000")
+                logging.debug("000000000000000000000000000000")
+                logging.debug("000000000000000000000000000000")
+                logging.debug("000000000000000000000000000000")
+                logging.debug("000000000000000000000000000000")
+                logging.debug("000000000000000000000000000000")
+                logging.debug("R1 -> I2 DH PUBLIC KEY ---------------------")
+                logging.debug(public_key_i)
+                logging.debug(public_key_r)
+                logging.debug("R1 -> I2 DH PRIVATE KEY ---------------------")
+                logging.debug(private_key)
+                logging.debug("000000000000000000000000000000")
+                logging.debug("000000000000000000000000000000")
+                logging.debug("000000000000000000000000000000")
+                logging.debug("000000000000000000000000000000")
+                logging.debug("000000000000000000000000000000")
+                logging.debug("000000000000000000000000000000")
+
+                if not self.dh_storage.get(r1_counter_param.get_counter(), None):
+                    self.dh_storage[r1_counter_param.get_counter()] = HIPState.Storage()
+                #if Utils.is_hit_smaller(rhit, ihit):
+                self.dh_storage[r1_counter_param.get_counter()].save(Utils.ipv6_bytes_to_hex_formatted(ihit), 
+                    Utils.ipv6_bytes_to_hex_formatted(rhit), dh);
+                #else:
+                #    self.dh_storage[r1_counter_param.get_counter()].save(Utils.ipv6_bytes_to_hex_formatted(ihit), 
+                #        Utils.ipv6_bytes_to_hex_formatted(rhit), dh);
                 #dh_storage.save(Utils.ipv6_bytes_to_hex_formatted(ihit), 
                 #	Utils.ipv6_bytes_to_hex_formatted(rhit), dh);
+
+                logging.debug("SAVING DH STORAGE ----------------- R1 PACKET (%s, %s)" % (src_str, dst_str))
 
                 info = Utils.sort_hits(ihit, rhit);
                 salt = irandom + jrandom;
@@ -751,12 +895,18 @@ class HIPLib():
                 keymat_length_in_octets = Utils.compute_keymat_length(hmac_alg, selected_cipher);
                 keymat = Utils.kdf(hmac_alg, salt, Math.int_to_bytes(shared_secret), info, keymat_length_in_octets);
 
-                if Utils.is_hit_smaller(rhit, ihit):
-                    self.keymat_storage.save(Utils.ipv6_bytes_to_hex_formatted(rhit), 
-                        Utils.ipv6_bytes_to_hex_formatted(ihit), keymat);
-                else:
-                    self.keymat_storage.save(Utils.ipv6_bytes_to_hex_formatted(ihit), 
-                        Utils.ipv6_bytes_to_hex_formatted(rhit), keymat);
+                logging.debug("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+                logging.debug("------ SAVING KEYMAT IN R1 ------- %s %s %d" % (src_str, dst_str, sv.is_responder))
+                logging.debug("------ SAVING KEYMAT IN R1 ------- %s %s %d" % (Utils.ipv6_bytes_to_hex_formatted(rhit), Utils.ipv6_bytes_to_hex_formatted(ihit), sv.is_responder))
+                logging.debug("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+                #if Utils.is_hit_smaller(rhit, ihit):
+                #    #self.keymat_storage.save(Utils.ipv6_bytes_to_hex_formatted(rhit), 
+                #    #    Utils.ipv6_bytes_to_hex_formatted(ihit), keymat);
+                self.keymat_storage.save(Utils.ipv6_bytes_to_hex_formatted(rhit), 
+                    Utils.ipv6_bytes_to_hex_formatted(ihit), keymat);
+                #else:
+                #    self.keymat_storage.save(Utils.ipv6_bytes_to_hex_formatted(ihit), 
+                #        Utils.ipv6_bytes_to_hex_formatted(rhit), keymat);
                 
 
                 logging.debug("Processing R1 packet %f" % (time.time() - st));
@@ -825,7 +975,10 @@ class HIPLib():
                 hip_i2_packet.set_length(int(packet_length / 8));
                 buf = hip_i2_packet.get_buffer() + buf;
                 
-                (aes_key, hmac_key) = Utils.get_keys(keymat, hmac_alg, selected_cipher, ihit, rhit);
+
+                # R1 packet incomming, IHIT - sender (Initiator), RHIT - own HIT (responder)
+                # From this two we need to choose
+                (aes_key, hmac_key) = Utils.get_keys(keymat, hmac_alg, selected_cipher, rhit, ihit);
                 hmac = HMACFactory.get(hmac_alg, hmac_key);
                 mac_param.set_hmac(hmac.digest(bytearray(buf)));
 
@@ -953,13 +1106,60 @@ class HIPLib():
                 else:
                     sv = self.state_variables.get(Utils.ipv6_bytes_to_hex_formatted(ihit),
                         Utils.ipv6_bytes_to_hex_formatted(rhit));
+                logging.debug("....SAVING I2 PACKET INTO THE MEMEORY.....")
                 sv.i2_packet = ipv4_packet;
+                logging.debug(":::::::::::::::::::::")
+                logging.debug(sv.i2_packet.get_buffer())
 
                 if hip_state.is_i1_sent() or hip_state.is_closing() or hip_state.is_closed():
                     hip_state.i2_sent();
             elif hip_packet.get_packet_type() == HIP.HIP_I2_PACKET:
-                logging.info("I2 packet");
+                logging.info("---------------------------- I2 packet ---------------------------- ");
                 st = time.time();
+                
+                if hip_state.is_i2_sent() and Utils.is_hit_smaller(rhit, ihit):
+                    logging.debug("Staying in I2-SENT state. Dropping the packet...");
+                    return [];
+            
+                if Utils.is_hit_smaller(rhit, ihit):
+                    sv = self.state_variables.get(Utils.ipv6_bytes_to_hex_formatted(rhit),
+                            Utils.ipv6_bytes_to_hex_formatted(ihit))
+                    
+                    if not sv:
+                        sv = HIPState.StateVariables(hip_state.get_state(), ihit, rhit, dst, src)
+                     
+                        self.state_variables.save(Utils.ipv6_bytes_to_hex_formatted(rhit),
+                            Utils.ipv6_bytes_to_hex_formatted(ihit),
+                            sv)
+                        sv.is_responder = True;
+                        sv.ihit = ihit;
+                        sv.rhit = rhit;
+                    else:
+                        sv.state = hip_state.get_state()
+                        sv.is_responder = True;
+                        sv.ihit = ihit;
+                        sv.rhit = rhit;
+                else:
+                    sv = self.state_variables.get(Utils.ipv6_bytes_to_hex_formatted(ihit),
+                            Utils.ipv6_bytes_to_hex_formatted(rhit))
+                            
+                    if not sv:
+                        sv = HIPState.StateVariables(hip_state.get_state(), ihit, rhit, dst, src)
+                        self.state_variables.save(Utils.ipv6_bytes_to_hex_formatted(ihit),
+                            Utils.ipv6_bytes_to_hex_formatted(rhit),
+                            sv)
+                        sv.is_responder = True;
+                        sv.ihit = ihit;
+                        sv.rhit = rhit;
+                    else:
+                        sv.state = hip_state.get_state()
+                        sv.is_responder = True;
+                        sv.ihit = ihit;
+                        sv.rhit = rhit;
+                
+                #logging.debug("CHANGING %d " % sv.is_responder)
+                logging.debug("CHANGING I2 %d %s %s" % (sv.is_responder, Utils.ipv6_bytes_to_hex_formatted(ihit), Utils.ipv6_bytes_to_hex_formatted(rhit)))
+
 
                 solution_param     = None;
                 r1_counter_param   = None;
@@ -1106,7 +1306,7 @@ class HIPLib():
                 jrandom = solution_param.get_solution(r_hash.LENGTH);
                 irandom = solution_param.get_random(r_hash.LENGTH);
                 if not PuzzleSolver.verify_puzzle(
-                    irandom, 
+                     irandom, 
                     jrandom, 
                     hip_packet.get_senders_hit(), 
                     hip_packet.get_receivers_hit(), 
@@ -1116,18 +1316,43 @@ class HIPLib():
                 logging.debug("Puzzle was solved");
 
 
-                if Utils.is_hit_smaller(rhit, ihit):
-                    dh = self.dh_storage.get(Utils.ipv6_bytes_to_hex_formatted(rhit), 
-                        Utils.ipv6_bytes_to_hex_formatted(ihit));
-                else:
-                    dh = self.dh_storage.get(Utils.ipv6_bytes_to_hex_formatted(ihit), 
-                        Utils.ipv6_bytes_to_hex_formatted(rhit));
+                #if Utils.is_hit_smaller(rhit, ihit):
+                logging.debug("**********************************************")
+                logging.debug("**********************************************")
+                logging.debug("**********************************************")
+                logging.debug("**********************************************")
+                logging.debug(r1_counter_param.get_counter())
+                logging.debug("**********************************************")
+                logging.debug("**********************************************")
+                logging.debug("**********************************************")
+                logging.debug("**********************************************")
+                dh = self.dh_storage[r1_counter_param.get_counter()].get(Utils.ipv6_bytes_to_hex_formatted(ihit), 
+                    Utils.ipv6_bytes_to_hex_formatted(rhit));
+                #else:
+                #   dh = self.dh_storage[r1_counter_param.get_counter()].get(Utils.ipv6_bytes_to_hex_formatted(ihit), 
+                #        Utils.ipv6_bytes_to_hex_formatted(rhit));
                 #dh_storage.get(Utils.ipv6_bytes_to_hex_formatted(ihit), 
                 #	Utils.ipv6_bytes_to_hex_formatted(rhit));
 
+                logging.debug("I2 -> R2 DH PUBLIC KEY ---------------------")
+                logging.debug(dh_param.get_public_value())
+                logging.debug("++++++++++++++++++++++++++++++++++++++++++++")
                 public_key_r = dh.decode_public_key(dh_param.get_public_value());
                 shared_secret = dh.compute_shared_secret(public_key_r);
-                logging.debug("Secret key %d" % shared_secret);
+                logging.debug("111111111111111111111111111")
+                logging.debug("111111111111111111111111111")
+                logging.debug("111111111111111111111111111")
+                logging.debug("111111111111111111111111111")
+                logging.debug("111111111111111111111111111")
+                logging.debug(dh_param.get_public_value())
+                logging.debug("111111111111111111111111111")
+                logging.debug("111111111111111111111111111")
+                logging.debug("111111111111111111111111111")
+                logging.debug("111111111111111111111111111")
+                logging.debug("111111111111111111111111111")
+                logging.debug("Secret key %d %s %s" % (shared_secret, src_str, dst_str));
+                logging.debug("I2 PACKET R1 COUNTER ------------- %d", r1_counter_param.get_counter());
+                logging.debug("SENDER %s, %s" % (src_str, dst_str))
 
                 info = Utils.sort_hits(ihit, rhit);
                 salt = irandom + jrandom;
@@ -1168,14 +1393,18 @@ class HIPLib():
                 keymat_length_in_octets = Utils.compute_keymat_length(hmac_alg, selected_cipher);
                 keymat = Utils.kdf(hmac_alg, salt, Math.int_to_bytes(shared_secret), info, keymat_length_in_octets);
 
-                if Utils.is_hit_smaller(rhit, ihit):
-                    self.keymat_storage.save(Utils.ipv6_bytes_to_hex_formatted(rhit), 
-                        Utils.ipv6_bytes_to_hex_formatted(ihit), keymat);
-                else:
-                    self.keymat_storage.save(Utils.ipv6_bytes_to_hex_formatted(ihit), 
-                        Utils.ipv6_bytes_to_hex_formatted(rhit), keymat);
-                #keymat_storage.save(Utils.ipv6_bytes_to_hex_formatted(ihit), 
-                #	Utils.ipv6_bytes_to_hex_formatted(rhit), keymat);
+                logging.debug("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+                logging.debug("------ SAVING KEYMAT IN I2 ------- %s %s %d" % (src_str, dst_str, sv.is_responder))
+                logging.debug("------ SAVING KEYMAT IN I2 ------- %s %s %d" % (Utils.ipv6_bytes_to_hex_formatted(ihit), Utils.ipv6_bytes_to_hex_formatted(rhit), sv.is_responder))
+                logging.debug("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+                #if Utils.is_hit_smaller(rhit, ihit):
+                #    self.keymat_storage.save(Utils.ipv6_bytes_to_hex_formatted(rhit), 
+                #        Utils.ipv6_bytes_to_hex_formatted(ihit), keymat);
+                #else:
+                #    self.keymat_storage.save(Utils.ipv6_bytes_to_hex_formatted(ihit), 
+                #        Utils.ipv6_bytes_to_hex_formatted(rhit), keymat);
+                self.keymat_storage.save(Utils.ipv6_bytes_to_hex_formatted(ihit), 
+                	Utils.ipv6_bytes_to_hex_formatted(rhit), keymat);
 
                 if Utils.is_hit_smaller(rhit, ihit):
                     self.cipher_storage.save(Utils.ipv6_bytes_to_hex_formatted(rhit), 
@@ -1187,6 +1416,7 @@ class HIPLib():
                 #	Utils.ipv6_bytes_to_hex_formatted(rhit), selected_cipher);
 
                 if encrypted_param:
+                    # I2 packet incomming, IHIT - sender (Initiator), RHIT - own HIT (responder)
                     (aes_key, hmac_key) = Utils.get_keys(keymat, hmac_alg, selected_cipher, ihit, rhit);
                     cipher = SymmetricCiphersFactory.get(selected_cipher);
                     iv_length = cipher.BLOCK_SIZE;
@@ -1209,7 +1439,7 @@ class HIPLib():
                     oga = HIT.get_responders_oga_id(rhit);
                     responders_hit = HIT.get(responder_hi.to_byte_array(), oga);
                     if not Utils.hits_equal(ihit, responders_hit):
-                        logging.critical("Not our HIT");
+                        logging.critical("Invalid HIT");
                         raise Exception("Invalid HIT");
                     
                     if isinstance(responder_hi, RSAHostID): #RSA
@@ -1257,11 +1487,12 @@ class HIPLib():
                 hip_i2_packet.set_length(int(packet_length / 8));
                 buf = hip_i2_packet.get_buffer() + buf;
                 
-                (aes_key, hmac_key) = Utils.get_keys(keymat, hmac_alg, selected_cipher, rhit, ihit);
+                # I2 packet incomming, IHIT - sender (Initiator), RHIT - own HIT (responder)
+                (aes_key, hmac_key) = Utils.get_keys(keymat, hmac_alg, selected_cipher, ihit, rhit);
                 hmac = HMACFactory.get(hmac_alg, hmac_key);
 
                 if hmac.digest(buf) != mac_param.get_hmac():
-                    logging.critical("Invalid HMAC. Dropping the packet");
+                    logging.critical("Invalid HMAC (I2). Dropping the packet");
                     return [];
 
                 # Compute signature here
@@ -1330,7 +1561,8 @@ class HIPLib():
 
                 hip_r2_packet.add_parameter(esp_info_param);
 
-                (aes_key, hmac_key) = Utils.get_keys(keymat, hmac_alg, selected_cipher, ihit, rhit);
+                # R2 packet outgoing, IHIT - sender (Initiator), RHIT - own HIT (responder), IHIT - 1, RHIT - 2
+                (aes_key, hmac_key) = Utils.get_keys(keymat, hmac_alg, selected_cipher, rhit, ihit);
                 hmac = HMACFactory.get(hmac_alg, hmac_key);
 
                 mac_param = HIP.MAC2Parameter();
@@ -1419,6 +1651,11 @@ class HIPLib():
 
                 (cipher, hmac) = ESPTransformFactory.get(selected_esp_transform);
 
+                logging.debug("DERIVING KEYS")
+                logging.debug(keymat)
+                # I2 PACKET
+                # Responder
+                # OUT DIRECTION (IHIT - sender, RHIT - OWN)
                 (cipher_key, hmac_key) = Utils.get_keys_esp(
                     keymat, 
                     keymat_index, 
@@ -1430,14 +1667,14 @@ class HIPLib():
                 self.ip_sec_sa.add_record(Utils.ipv6_bytes_to_hex_formatted(rhit), 
                     Utils.ipv6_bytes_to_hex_formatted(ihit), sa_record);
 
+                
+                # IN DIRECTION (IHIT - sender, RHIT - OWN)
                 (cipher_key, hmac_key) = Utils.get_keys_esp(
                     keymat, 
                     keymat_index, 
                     hmac.ALG_ID, 
                     cipher.ALG_ID, 
                     rhit, ihit);
-                #(aes_key, hmac_key) = Utils.get_keys_esp(keymat, hmac_alg, selected_cipher, rhit, ihit);
-                #sa_record = SA.SecurityAssociationRecord(selected_cipher, hmac_alg, aes_key, hmac_key, rhit, ihit);
                 sa_record = SA.SecurityAssociationRecord(cipher.ALG_ID, hmac.ALG_ID, cipher_key, hmac_key, rhit, ihit);
                 sa_record.set_spi(initiators_spi);
                 self.ip_sec_sa.add_record(dst_str, src_str, sa_record);
@@ -1450,7 +1687,6 @@ class HIPLib():
                         Utils.ipv6_bytes_to_hex_formatted(rhit));
                 
                 sv.ec_complete_timeout = time.time() + self.config["general"]["EC"];
-
             elif hip_packet.get_packet_type() == HIP.HIP_R2_PACKET:
                 
                 if (hip_state.is_unassociated() 
@@ -1462,6 +1698,45 @@ class HIPLib():
                     logging.debug("Dropping the packet");
                     return [];
 
+                if Utils.is_hit_smaller(rhit, ihit):
+                    sv = self.state_variables.get(Utils.ipv6_bytes_to_hex_formatted(rhit),
+                            Utils.ipv6_bytes_to_hex_formatted(ihit))
+                    
+                    if not sv:
+                        sv = HIPState.StateVariables(hip_state.get_state(), rhit, ihit, dst, src)
+                     
+                        self.state_variables.save(Utils.ipv6_bytes_to_hex_formatted(rhit),
+                            Utils.ipv6_bytes_to_hex_formatted(ihit),
+                            sv)
+                        sv.is_responder = False;
+                        sv.ihit = rhit;
+                        sv.rhit = ihit;
+                    else:
+                        sv.state = hip_state.get_state()
+                        sv.is_responder = False;
+                        sv.ihit = rhit;
+                        sv.rhit = ihit;
+                else:
+                    sv = self.state_variables.get(Utils.ipv6_bytes_to_hex_formatted(ihit),
+                            Utils.ipv6_bytes_to_hex_formatted(rhit))
+                            
+                    if not sv:
+                        sv = HIPState.StateVariables(hip_state.get_state(), rhit, ihit, dst, src)
+                        self.state_variables.save(Utils.ipv6_bytes_to_hex_formatted(ihit),
+                            Utils.ipv6_bytes_to_hex_formatted(rhit),
+                            sv)
+                        sv.is_responder = False;
+                        sv.ihit = rhit;
+                        sv.rhit = ihit;
+                    else:
+                        sv.state = hip_state.get_state()
+                        sv.is_responder = False;
+                        sv.ihit = rhit;
+                        sv.rhit = ihit;
+                
+                #logging.debug("CHANGING %d " % sv.is_responder)
+                logging.debug("CHANGING R2 %d %s %s" % (sv.is_responder, Utils.ipv6_bytes_to_hex_formatted(ihit), Utils.ipv6_bytes_to_hex_formatted(rhit)))
+                
                 st = time.time();
 
                 logging.info("R2 packet");
@@ -1475,17 +1750,17 @@ class HIPLib():
                     cipher_alg = self.cipher_storage.get(Utils.ipv6_bytes_to_hex_formatted(ihit), 
                         Utils.ipv6_bytes_to_hex_formatted(rhit));
 
-                if Utils.is_hit_smaller(rhit, ihit):
-                    keymat = self.keymat_storage.get(Utils.ipv6_bytes_to_hex_formatted(rhit), 
-                        Utils.ipv6_bytes_to_hex_formatted(ihit));
-                else:
-                    keymat = self.keymat_storage.get(Utils.ipv6_bytes_to_hex_formatted(ihit), 
-                        Utils.ipv6_bytes_to_hex_formatted(rhit));
+                #if Utils.is_hit_smaller(rhit, ihit):
+                #    keymat = self.keymat_storage.get(Utils.ipv6_bytes_to_hex_formatted(rhit), 
+                #        Utils.ipv6_bytes_to_hex_formatted(ihit));
+                #else:
+                #    keymat = self.keymat_storage.get(Utils.ipv6_bytes_to_hex_formatted(ihit), 
+                #        Utils.ipv6_bytes_to_hex_formatted(rhit));
 
-                #keymat = keymat_storage.get(Utils.ipv6_bytes_to_hex_formatted(ihit), 
-                #	Utils.ipv6_bytes_to_hex_formatted(rhit));
-
-                (aes_key, hmac_key) = Utils.get_keys(keymat, hmac_alg, cipher_alg, rhit, ihit);
+                keymat = self.keymat_storage.get(Utils.ipv6_bytes_to_hex_formatted(rhit), 
+                	Utils.ipv6_bytes_to_hex_formatted(ihit));
+                # R2 packet incomming, IHIT - sender (Responder), RHIT - own HIT (Initiator)
+                (aes_key, hmac_key) = Utils.get_keys(keymat, hmac_alg, cipher_alg, ihit, rhit);
                 hmac = HMACFactory.get(hmac_alg, hmac_key);
                 parameters       = hip_packet.get_parameters();
                 
@@ -1530,7 +1805,7 @@ class HIPLib():
                 hip_r2_packet.add_parameter(esp_info_param);
 
                 if hmac.digest(hip_r2_packet.get_buffer()) != hmac_param.get_hmac():
-                    logging.critical("Invalid HMAC. Dropping the packet");
+                    logging.critical("Invalid HMAC (R2). Dropping the packet");
                     return [];
                 else:
                     logging.debug("HMAC is ok. return with signature");
@@ -1589,6 +1864,14 @@ class HIPLib():
 
                 logging.debug(hmac.ALG_ID);
                 logging.debug(cipher.ALG_ID);
+                
+                logging.debug("DERIVING KEYS")
+                logging.debug(keymat)
+
+                # Incomming SA (IPa, IPb)
+                # R2 PACKET
+                # Initiator
+                # OUT DIRECTION (IHIT - sender, RHIT - OWN)
                 (cipher_key, hmac_key) = Utils.get_keys_esp(
                     keymat, 
                     keymat_index, 
@@ -1597,9 +1880,12 @@ class HIPLib():
                     ihit, rhit);
                 sa_record = SA.SecurityAssociationRecord(cipher.ALG_ID, hmac.ALG_ID, cipher_key, hmac_key, dst, src);
                 sa_record.set_spi(responders_spi);
+                
                 self.ip_sec_sa.add_record(Utils.ipv6_bytes_to_hex_formatted(rhit), 
                     Utils.ipv6_bytes_to_hex_formatted(ihit), sa_record);
-
+                
+                # Outgoing SA (HITa, HITb)
+                # IN DIRECTION (IHIT - sender, RHIT - OWN)
                 (cipher_key, hmac_key) = Utils.get_keys_esp(
                     keymat, 
                     keymat_index, 
@@ -1640,12 +1926,12 @@ class HIPLib():
                 dh_param         = None;
                 esp_info         = None;
                 
-                if Utils.is_hit_smaller(rhit, ihit):
-                    keymat = self.keymat_storage.get(Utils.ipv6_bytes_to_hex_formatted(rhit), 
-                        Utils.ipv6_bytes_to_hex_formatted(ihit));
-                else:
-                    keymat = self.keymat_storage.get(Utils.ipv6_bytes_to_hex_formatted(ihit), 
-                        Utils.ipv6_bytes_to_hex_formatted(rhit));
+                #if Utils.is_hit_smaller(rhit, ihit):
+                #    keymat = self.keymat_storage.get(Utils.ipv6_bytes_to_hex_formatted(rhit), 
+                #        Utils.ipv6_bytes_to_hex_formatted(ihit));
+                #else:
+                #    keymat = self.keymat_storage.get(Utils.ipv6_bytes_to_hex_formatted(ihit), 
+                #        Utils.ipv6_bytes_to_hex_formatted(rhit));
 
                 if Utils.is_hit_smaller(rhit, ihit):
                     sv = self.state_variables.get(Utils.ipv6_bytes_to_hex_formatted(rhit),
@@ -1654,7 +1940,17 @@ class HIPLib():
                     sv = self.state_variables.get(Utils.ipv6_bytes_to_hex_formatted(ihit),
                         Utils.ipv6_bytes_to_hex_formatted(rhit));
 
+                
+                keymat = self.keymat_storage.get(Utils.ipv6_bytes_to_hex_formatted(sv.ihit), 
+                    Utils.ipv6_bytes_to_hex_formatted(sv.rhit));
+                #if not keymat:
+                #    logging.debug("------ GETING KEYMAT IN UPDATE IN ------- %s %s %d" % (Utils.ipv6_bytes_to_hex_formatted(sv.ihit), Utils.ipv6_bytes_to_hex_formatted(sv.rhit), sv.is_responder))
+                ##    logging.debug("++++++++++++++++++++++++++++ ERROR INVALID KEYING MATERIAL UPDATE IN ++++++++++++++++++++++++++++")
+                #    keymat = self.keymat_storage.get(Utils.ipv6_bytes_to_hex_formatted(sv.rhit), 
+                #        Utils.ipv6_bytes_to_hex_formatted(sv.ihit));
+                
                 if sv.is_responder:
+                    
                     logging.debug("Reponder's HIT %s " % (Utils.ipv6_bytes_to_hex_formatted(ihit)))
                     logging.debug("Initiator's HIT %s " % (Utils.ipv6_bytes_to_hex_formatted(rhit)))
                     hmac_alg  = HIT.get_responders_oga_id(rhit);
@@ -1672,7 +1968,15 @@ class HIPLib():
                     cipher_alg = self.cipher_storage.get(Utils.ipv6_bytes_to_hex_formatted(ihit), 
                         Utils.ipv6_bytes_to_hex_formatted(rhit));
 
-                (aes_key, hmac_key) = Utils.get_keys(keymat, hmac_alg, cipher_alg, ihit, rhit);
+                #if sv.is_responder:
+                # UPDATE packet incomming, IHIT - sender (Initiator), RHIT - own HIT (responder)
+                if sv.is_responder:
+                    (aes_key, hmac_key) = Utils.get_keys(keymat, hmac_alg, cipher_alg, sv.ihit, sv.rhit);
+                else:
+                    (aes_key, hmac_key) = Utils.get_keys(keymat, hmac_alg, cipher_alg, sv.rhit, sv.ihit);
+                #else:
+                #(aes_key, hmac_key) = Utils.get_keys(keymat, hmac_alg, cipher_alg, rhit, ihit);
+                #(aes_key, hmac_key) = Utils.get_keys(keymat, hmac_alg, cipher_alg, sv.ihit, sv.rhit);
                 hmac = HMACFactory.get(hmac_alg, hmac_key);
 
                 for parameter in parameters:
@@ -1724,7 +2028,10 @@ class HIPLib():
                 buf = hip_update_packet.get_buffer() + buf;
 
                 if hmac.digest(bytearray(buf)) != mac_param.get_hmac():
-                    logging.critical("Invalid HMAC. Dropping the packet");
+                    if ack_param:
+                        logging.critical("Invalid HMAC (UPDATE ACK packet). Dropping the packet %s %s" % (src_str, dst_str))
+                    else:
+                        logging.critical("Invalid HMAC (UPDATE packet). Dropping the packet %s %s" % (src_str, dst_str));
                     return [];
 
                 responders_public_key = self.pubkey_storage.get(Utils.ipv6_bytes_to_hex_formatted(ihit), 
@@ -1766,7 +2073,20 @@ class HIPLib():
                     logging.debug("This is a response to a UPDATE. Skipping pong...");
                     return [];
 
-                (aes_key, hmac_key) = Utils.get_keys(keymat, hmac_alg, cipher_alg, rhit, ihit);
+                #(aes_key, hmac_key) = Utils.get_keys(keymat, hmac_alg, cipher_alg, rhit, ihit);
+                
+                #if sv.is_responder:
+                #(aes_key, hmac_key) = Utils.get_keys(keymat, hmac_alg, cipher_alg, ihit, rhit);
+                #else:
+                # UPDATE ACK packet outgoing, RHIT - own HIT (Initiator), IHIT - recipient
+                #(aes_key, hmac_key) = Utils.get_keys(keymat, hmac_alg, cipher_alg, sv.rhit, sv.ihit);
+                # OUT DIRECTION
+                if sv.is_responder:
+                    (aes_key, hmac_key) = Utils.get_keys(keymat, hmac_alg, cipher_alg, sv.rhit, sv.ihit);
+                else:
+                    (aes_key, hmac_key) = Utils.get_keys(keymat, hmac_alg, cipher_alg, sv.ihit, sv.rhit);
+                #(aes_key, hmac_key) = Utils.get_keys(keymat, hmac_alg, cipher_alg, sv.rhit, sv.ihit);
+
                 hmac = HMACFactory.get(hmac_alg, hmac_key);
 
                 hip_update_packet = HIP.UpdatePacket();
@@ -1837,7 +2157,7 @@ class HIPLib():
                     hip_state.established();
             elif hip_packet.get_packet_type() == HIP.HIP_NOTIFY_PACKET:
                 logging.info("NOTIFY packet");
-                if hip_state.is_i1_sent() or hip_state.is_i2_sent() or hip_state.is_unassociated():
+                if hip_state.is_i1_sent() or hip_state.is_i2_sent() or hip_state.is_unassociated() or hip_state.is_closing() or hip_state.closed():
                     logging.debug("Dropping the packet...")
                     return [];
                 # process the packet...
@@ -1852,12 +2172,12 @@ class HIPLib():
                 signature_param  = None;
                 mac_param        = None;
                 
-                if Utils.is_hit_smaller(rhit, ihit):
-                    keymat = self.keymat_storage.get(Utils.ipv6_bytes_to_hex_formatted(rhit), 
-                        Utils.ipv6_bytes_to_hex_formatted(ihit));
-                else:
-                    keymat = self.keymat_storage.get(Utils.ipv6_bytes_to_hex_formatted(ihit), 
-                        Utils.ipv6_bytes_to_hex_formatted(rhit));
+                #if Utils.is_hit_smaller(rhit, ihit):
+                #    keymat = self.keymat_storage.get(Utils.ipv6_bytes_to_hex_formatted(rhit), 
+                #        Utils.ipv6_bytes_to_hex_formatted(ihit));
+                #else:
+                #    keymat = self.keymat_storage.get(Utils.ipv6_bytes_to_hex_formatted(ihit), 
+                #        Utils.ipv6_bytes_to_hex_formatted(rhit));
 
                 if Utils.is_hit_smaller(rhit, ihit):
                     sv = self.state_variables.get(Utils.ipv6_bytes_to_hex_formatted(rhit),
@@ -1870,6 +2190,14 @@ class HIPLib():
                     logging.debug("Not state exists. Skipping the packet...")
                     return [];
 
+                keymat = self.keymat_storage.get(Utils.ipv6_bytes_to_hex_formatted(sv.ihit), 
+                    Utils.ipv6_bytes_to_hex_formatted(sv.rhit));
+                #if not keymat:
+                #    logging.debug("------ GETING KEYMAT IN CLOSE ------- %s %s %d" % (Utils.ipv6_bytes_to_hex_formatted(sv.ihit), Utils.ipv6_bytes_to_hex_formatted(sv.rhit), sv.is_responder))
+                #    logging.debug("++++++++++++++++++++++++++++ ERROR INVALID KEYING MATERIAL CLOSE IN ++++++++++++++++++++++++++++")
+                #    keymat = self.keymat_storage.get(Utils.ipv6_bytes_to_hex_formatted(sv.rhit), 
+                #        Utils.ipv6_bytes_to_hex_formatted(sv.ihit));
+                
                 if sv.is_responder:
                     hmac_alg  = HIT.get_responders_oga_id(rhit);
                     logging.debug("Responder's HMAC algorithm %d" % (hmac_alg));
@@ -1887,7 +2215,15 @@ class HIPLib():
                 logging.debug("Cipher algorithm %d " % (cipher_alg));
                 logging.debug("HMAC algorithm %d" % (hmac_alg));
 
-                (aes_key, hmac_key) = Utils.get_keys(keymat, hmac_alg, cipher_alg, ihit, rhit);
+                #(aes_key, hmac_key) = Utils.get_keys(keymat, hmac_alg, cipher_alg, ihit, rhit);
+                #if sv.is_responder:
+                #(aes_key, hmac_key) = Utils.get_keys(keymat, hmac_alg, cipher_alg, ihit, rhit);
+                #else:
+                # CLOSE packet incomming, IHIT - sender (Initiator), RHIT - own HIT (responder)
+                if sv.is_responder:
+                    (aes_key, hmac_key) = Utils.get_keys(keymat, hmac_alg, cipher_alg, sv.ihit, sv.rhit);
+                else:
+                    (aes_key, hmac_key) = Utils.get_keys(keymat, hmac_alg, cipher_alg, sv.rhit, sv.ihit);
                 hmac = HMACFactory.get(hmac_alg, hmac_key);
 
                 for parameter in parameters:
@@ -1933,7 +2269,7 @@ class HIPLib():
                 logging.debug("------------------------------------");
 
                 if hmac.digest(bytearray(buf)) != mac_param.get_hmac():
-                    logging.critical("Invalid HMAC. Dropping the packet");
+                    logging.critical("Invalid HMAC (CLOSE). Dropping the packet");
                     return [];
                 logging.debug("HMAC OK");
 
@@ -1969,7 +2305,11 @@ class HIPLib():
                 else:
                     logging.debug("Signature is correct");
 
-                (aes_key, hmac_key) = Utils.get_keys(keymat, hmac_alg, cipher_alg, rhit, ihit);
+                #(aes_key, hmac_key) = Utils.get_keys(keymat, hmac_alg, cipher_alg, rhit, ihit);
+                if sv.is_responder:
+                    (aes_key, hmac_key) = Utils.get_keys(keymat, hmac_alg, cipher_alg, sv.rhit, sv.ihit);
+                else:
+                    (aes_key, hmac_key) = Utils.get_keys(keymat, hmac_alg, cipher_alg, sv.ihit, sv.rhit);
                 hmac = HMACFactory.get(hmac_alg, hmac_key);
 
                 hip_close_ack_packet = HIP.CloseAckPacket();
@@ -2045,9 +2385,143 @@ class HIPLib():
                     sv.closed_timeout = time.time() + self.config["general"]["UAL"] + 2*self.config["general"]["MSL"];
             elif hip_packet.get_packet_type == HIP.HIP_CLOSE_ACK_PACKET:
                 logging.info("CLOSE ACK packet");
-                if hip_state.is_r2_sent() or hip_state.is_established() or hip_state.is_i1_sent() or hip_state.is_i2_sent() or hip_state.is_unassociated():
+                if hip_state.is_r2_sent() or hip_state.is_established() or hip_state.is_i1_sent() or hip_state.is_i2_sent() or hip_state.is_unassociated() or hip_state.is_closing():
                     logging.debug("Dropping packet");
                     return [];
+                
+                parameters       = hip_packet.get_parameters();
+
+                echo_param       = None;
+                signature_param  = None;
+                mac_param        = None;
+
+                if Utils.is_hit_smaller(rhit, ihit):
+                    sv = self.state_variables.get(Utils.ipv6_bytes_to_hex_formatted(rhit),
+                        Utils.ipv6_bytes_to_hex_formatted(ihit));
+                else:
+                    sv = self.state_variables.get(Utils.ipv6_bytes_to_hex_formatted(ihit),
+                        Utils.ipv6_bytes_to_hex_formatted(rhit));
+
+                if not sv:
+                    logging.debug("Not state exists. Skipping the packet...")
+                    return [];
+
+                keymat = self.keymat_storage.get(Utils.ipv6_bytes_to_hex_formatted(sv.ihit), 
+                    Utils.ipv6_bytes_to_hex_formatted(sv.rhit));
+                #if not keymat:
+                #    logging.debug("------ GETING KEYMAT IN CLOSE ACK ------- %s %s %d" % (Utils.ipv6_bytes_to_hex_formatted(sv.ihit), Utils.ipv6_bytes_to_hex_formatted(sv.rhit), sv.is_responder))
+                #    logging.debug("++++++++++++++++++++++++++++ ERROR INVALID KEYING MATERIAL CLOSE ACK IN ++++++++++++++++++++++++++++")
+                #    keymat = self.keymat_storage.get(Utils.ipv6_bytes_to_hex_formatted(sv.rhit), 
+                #        Utils.ipv6_bytes_to_hex_formatted(sv.ihit));
+                
+                if sv.is_responder:
+                    hmac_alg  = HIT.get_responders_oga_id(rhit);
+                    logging.debug("Responder's HMAC algorithm %d" % (hmac_alg));
+                else:
+                    hmac_alg  = HIT.get_responders_oga_id(ihit);
+                    logging.debug("Responder's HMAC algorithm %d" % (hmac_alg));
+
+                if Utils.is_hit_smaller(rhit, ihit):
+                    cipher_alg = self.cipher_storage.get(Utils.ipv6_bytes_to_hex_formatted(rhit), 
+                        Utils.ipv6_bytes_to_hex_formatted(ihit));
+                else:
+                    cipher_alg = self.cipher_storage.get(Utils.ipv6_bytes_to_hex_formatted(ihit), 
+                        Utils.ipv6_bytes_to_hex_formatted(rhit));
+
+                logging.debug("Cipher algorithm %d " % (cipher_alg));
+                logging.debug("HMAC algorithm %d" % (hmac_alg));
+
+                #(aes_key, hmac_key) = Utils.get_keys(keymat, hmac_alg, cipher_alg, ihit, rhit);
+                #if sv.is_responder:
+                #(aes_key, hmac_key) = Utils.get_keys(keymat, hmac_alg, cipher_alg, ihit, rhit);
+                #else:
+                # CLOSE packet incomming, IHIT - sender (Initiator), RHIT - own HIT (responder)
+                #(aes_key, hmac_key) = Utils.get_keys(keymat, hmac_alg, cipher_alg, rhit, ihit);
+                if sv.is_responder:
+                    (aes_key, hmac_key) = Utils.get_keys(keymat, hmac_alg, cipher_alg, sv.ihit, sv.rhit);
+                else:
+                    (aes_key, hmac_key) = Utils.get_keys(keymat, hmac_alg, cipher_alg, sv.rhit, sv.ihit);
+                hmac = HMACFactory.get(hmac_alg, hmac_key);
+
+                for parameter in parameters:
+                    if isinstance(parameter, HIP.EchoResponseSignedParameter):
+                        logging.debug("Echo response signed parameter");
+                        echo_param = parameter;
+                        logging.debug(list(echo_param.get_byte_buffer()));
+                    if isinstance(parameter, HIP.MACParameter):	
+                        logging.debug("MAC parameter");
+                        mac_param = parameter;
+                    if isinstance(parameter, HIP.SignatureParameter):
+                        logging.debug("Signature parameter");
+                        signature_param = parameter;
+
+                if not mac_param:
+                    logging.debug("Missing MAC parameter");
+                    return [];
+
+                if not signature_param:
+                    logging.debug("Missing signature parameter");
+                    return [];
+                
+                hip_close_ack_packet = HIP.CloseAckPacket();
+                logging.debug("Sender's HIT %s" % (Utils.ipv6_bytes_to_hex_formatted(ihit)));
+                logging.debug("Receiver's HIT %s" % (Utils.ipv6_bytes_to_hex_formatted(rhit)));
+                hip_close_ack_packet.set_senders_hit(ihit);
+                hip_close_ack_packet.set_receivers_hit(rhit);
+                hip_close_ack_packet.set_next_header(HIP.HIP_IPPROTO_NONE);
+                hip_close_ack_packet.set_version(HIP.HIP_VERSION);
+                hip_close_ack_packet.set_length(HIP.HIP_DEFAULT_PACKET_LENGTH);
+
+                # Compute HMAC here
+                buf = bytearray([]);
+                buf += echo_param.get_byte_buffer();				
+
+                original_length = hip_close_ack_packet.get_length();
+                packet_length = original_length * 8 + len(buf);
+                hip_close_ack_packet.set_length(int(packet_length / 8));
+                buf = hip_close_ack_packet.get_buffer() + buf;
+
+                logging.debug("------------------------------------");
+                logging.debug(list((buf)));
+                logging.debug("------------------------------------");
+
+                if hmac.digest(bytearray(buf)) != mac_param.get_hmac():
+                    logging.critical("Invalid HMAC (CLOSE ACK). Dropping the packet");
+                    return [];
+                logging.debug("HMAC OK");
+
+                responders_public_key = self.pubkey_storage.get(Utils.ipv6_bytes_to_hex_formatted(ihit), 
+                            Utils.ipv6_bytes_to_hex_formatted(rhit));
+
+                if isinstance(responders_public_key, RSAPublicKey):
+                    signature_alg = RSASHA256Signature(responders_public_key.get_key_info());
+                elif isinstance(responders_public_key, ECDSAPublicKey):
+                    signature_alg = ECDSASHA384Signature(responders_public_key.get_key_info());
+                elif isinstance(responders_public_key, ECDSALowPublicKey):
+                    signature_alg = ECDSASHA1Signature(responders_public_key.get_key_info());
+
+                hip_close_ack_packet = HIP.CloseAckPacket();
+                hip_close_ack_packet.set_senders_hit(ihit);
+                hip_close_ack_packet.set_receivers_hit(rhit);
+                hip_close_ack_packet.set_next_header(HIP.HIP_IPPROTO_NONE);
+                hip_close_ack_packet.set_version(HIP.HIP_VERSION);
+                hip_close_ack_packet.set_length(HIP.HIP_DEFAULT_PACKET_LENGTH);
+
+                buf = bytearray([]);
+                buf += echo_param.get_byte_buffer();
+                buf += mac_param.get_byte_buffer();
+
+                original_length = hip_close_ack_packet.get_length();
+                packet_length = original_length * 8 + len(buf);
+                hip_close_ack_packet.set_length(int(packet_length / 8));
+                buf = hip_close_ack_packet.get_buffer() + buf;
+
+                if not signature_alg.verify(signature_param.get_signature(), bytearray(buf)):
+                    logging.critical("Invalid signature. Dropping the packet");
+                    return [];
+                else:
+                    logging.debug("Signature is correct");
+
                 if hip_state.is_closing() or hip_state.is_closed():
                     logging.debug("Moving to unassociated state...");
                     hip_state.unassociated();
@@ -2084,7 +2558,7 @@ class HIPLib():
             # Get SA record and construct the ESP payload
             sa_record   = self.ip_sec_sa.get_record(src_str, dst_str);
             if not sa_record:
-                return None 
+                return (None, None, None) 
             hmac_alg    = sa_record.get_hmac_alg();
             cipher      = sa_record.get_aes_alg();
             hmac_key    = sa_record.get_hmac_key();
@@ -2201,13 +2675,13 @@ class HIPLib():
                 hip_state = self.hip_state_machine.get(Utils.ipv6_bytes_to_hex_formatted(ihit), 
                     Utils.ipv6_bytes_to_hex_formatted(rhit));
             if hip_state.is_unassociated() or hip_state.is_closing() or hip_state.is_closed():
-                logging.debug("Unassociate state reached");
-                logging.debug("Starting HIP BEX %f" % (time.time()));
-                logging.info("Resolving %s to IPv4 address" % Utils.ipv6_bytes_to_hex_formatted(rhit));
+                #logging.debug("Unassociate state reached");
+                #logging.debug("Starting HIP BEX %f" % (time.time()));
+                #logging.info("Resolving %s to IPv4 address" % Utils.ipv6_bytes_to_hex_formatted(rhit));
 
                 # Resolve the HIT code can be improved
                 if not self.hit_resolver.resolve(Utils.ipv6_bytes_to_hex_formatted_resolver(rhit)):
-                    logging.critical("Cannot resolve HIT to IPv4 address");
+                    #logging.critical("Cannot resolve HIT to IPv4 address");
                     return [];
 
                 # Convert bytes to string representation of IPv6 address
@@ -2257,26 +2731,39 @@ class HIPLib():
                 # Transition to an I1-Sent state
                 hip_state.i1_sent();
 
+                
                 if Utils.is_hit_smaller(rhit, ihit):
-                    self.state_variables.save(Utils.ipv6_bytes_to_hex_formatted(rhit),
-                        Utils.ipv6_bytes_to_hex_formatted(ihit),
-                        HIPState.StateVariables(hip_state.get_state(), ihit, rhit, src, dst));
                     sv = self.state_variables.get(Utils.ipv6_bytes_to_hex_formatted(rhit),
                         Utils.ipv6_bytes_to_hex_formatted(ihit))
+                    if not sv:
+                        self.state_variables.save(Utils.ipv6_bytes_to_hex_formatted(rhit),
+                            Utils.ipv6_bytes_to_hex_formatted(ihit),
+                            HIPState.StateVariables(hip_state.get_state(), ihit, rhit, src, dst));
+                    else:
+                        sv.state = hip_state.get_state()
+                        #sv.ihit = ihit;
+                        #sv.rhit = rhit;
+                    sv = self.state_variables.get(Utils.ipv6_bytes_to_hex_formatted(rhit),
+                        Utils.ipv6_bytes_to_hex_formatted(ihit))
+                    #sv.is_responder = False;
+                    sv.i1_timeout = time.time() + self.config["general"]["i1_timeout_s"];
+                    sv.i1_retries += 1;
                 else:
-                    self.state_variables.save(Utils.ipv6_bytes_to_hex_formatted(ihit),
-                        Utils.ipv6_bytes_to_hex_formatted(rhit),
-                        HIPState.StateVariables(hip_state.get_state(), ihit, rhit, src, dst));
                     sv = self.state_variables.get(Utils.ipv6_bytes_to_hex_formatted(ihit),
                         Utils.ipv6_bytes_to_hex_formatted(rhit))
-                #sv = state_variables.get(Utils.ipv6_bytes_to_hex_formatted(rhit),
-                #	Utils.ipv6_bytes_to_hex_formatted(ihit))
-                
-                sv.is_responder = False;
-
-                sv.i1_timeout = time.time() + self.config["general"]["i1_timeout_s"];
-                sv.i1_retries += 1;
-
+                    if not sv:
+                        self.state_variables.save(Utils.ipv6_bytes_to_hex_formatted(ihit),
+                            Utils.ipv6_bytes_to_hex_formatted(rhit),
+                            HIPState.StateVariables(hip_state.get_state(), ihit, rhit, src, dst));
+                    else:
+                        sv.state = hip_state.get_state()
+                        #sv.ihit = ihit;
+                        #sv.rhit = rhit;
+                    sv = self.state_variables.get(Utils.ipv6_bytes_to_hex_formatted(ihit),
+                        Utils.ipv6_bytes_to_hex_formatted(rhit))
+                    #sv.is_responder = False;
+                    sv.i1_timeout = time.time() + self.config["general"]["i1_timeout_s"];
+                    sv.i1_retries += 1;
             elif hip_state.is_established():
                 #logging.debug("Sending IPSEC packet...")
                 # IPv6 fields
@@ -2364,7 +2851,8 @@ class HIPLib():
                 #    (Utils.ipv4_bytes_to_string(dst), 0));
                 response.append((False, bytearray(ipv4_packet.get_buffer()), (Utils.ipv4_bytes_to_string(dst), 0)))
             else:
-                logging.debug("Unknown state reached.... %s " % (hip_state));
+                pass
+                #logging.debug("Unknown state reached.... %s " % (hip_state));
             return response;
         except Exception as e:
             logging.critical("Exception occured while processing packet from TUN interface. Dropping the packet.");
@@ -2387,13 +2875,21 @@ class HIPLib():
             if hip_state.is_unassociated():
                 return [];
 
-            if Utils.is_hit_smaller(sv.rhit, sv.ihit):
-                keymat = self.keymat_storage.get(Utils.ipv6_bytes_to_hex_formatted(sv.rhit), 
-                    Utils.ipv6_bytes_to_hex_formatted(sv.ihit));
-            else:
-                keymat = self.keymat_storage.get(Utils.ipv6_bytes_to_hex_formatted(sv.ihit), 
-                    Utils.ipv6_bytes_to_hex_formatted(sv.rhit));
-
+            #if Utils.is_hit_smaller(sv.rhit, sv.ihit):
+            #    keymat = self.keymat_storage.get(Utils.ipv6_bytes_to_hex_formatted(sv.rhit), 
+            #        Utils.ipv6_bytes_to_hex_formatted(sv.ihit));
+            #else:
+            #    keymat = self.keymat_storage.get(Utils.ipv6_bytes_to_hex_formatted(sv.ihit), 
+            #        Utils.ipv6_bytes_to_hex_formatted(sv.rhit));
+            #if sv.is_responder:
+        
+            keymat = self.keymat_storage.get(Utils.ipv6_bytes_to_hex_formatted(sv.ihit), 
+                Utils.ipv6_bytes_to_hex_formatted(sv.rhit));
+            #if not keymat:
+            #    logging.debug("------ GETING KEYMAT IN CLOSE ------- %s %s %d" % (Utils.ipv6_bytes_to_hex_formatted(sv.ihit), Utils.ipv6_bytes_to_hex_formatted(sv.rhit), sv.is_responder))
+            #    logging.debug("++++++++++++++++++++++++++++ ERROR INVALID KEYING MATERIAL CLOSE ++++++++++++++++++++++++++++")
+            #    keymat = self.keymat_storage.get(Utils.ipv6_bytes_to_hex_formatted(sv.rhit), 
+            #        Utils.ipv6_bytes_to_hex_formatted(sv.ihit));
             logging.debug("Responder's HIT %s" % (Utils.ipv6_bytes_to_hex_formatted(sv.rhit)))
             logging.debug("Initiator's HIT %s" % (Utils.ipv6_bytes_to_hex_formatted(sv.ihit)))
             hmac_alg  = HIT.get_responders_oga_id(sv.rhit);
@@ -2414,7 +2910,7 @@ class HIPLib():
                 #hmac_alg  = HIT.get_responders_oga_id(sv.rhit);
                 cipher_alg = self.cipher_storage.get(Utils.ipv6_bytes_to_hex_formatted(sv.ihit), 
                     Utils.ipv6_bytes_to_hex_formatted(sv.rhit));
-
+            # OUTGOING
             if sv.is_responder:
                 (aes_key, hmac_key) = Utils.get_keys(keymat, hmac_alg, cipher_alg, sv.rhit, sv.ihit);
             else:
@@ -2491,6 +2987,7 @@ class HIPLib():
         response = []
         for key in self.state_variables.keys():
             sv = self.state_variables.get_by_key(key);
+
             if Utils.is_hit_smaller(sv.rhit, sv.ihit):
                 hip_state = self.hip_state_machine.get(Utils.ipv6_bytes_to_hex_formatted(sv.rhit), 
                     Utils.ipv6_bytes_to_hex_formatted(sv.ihit));
@@ -2500,13 +2997,19 @@ class HIPLib():
             if hip_state.is_established():
                 if time.time() >= sv.data_timeout:
 
-                    if Utils.is_hit_smaller(sv.rhit, sv.ihit):
-                        keymat = self.keymat_storage.get(Utils.ipv6_bytes_to_hex_formatted(sv.rhit), 
-                            Utils.ipv6_bytes_to_hex_formatted(sv.ihit));
-                    else:
-                        keymat = self.keymat_storage.get(Utils.ipv6_bytes_to_hex_formatted(sv.ihit), 
-                            Utils.ipv6_bytes_to_hex_formatted(sv.rhit));
-
+                    #if Utils.is_hit_smaller(sv.rhit, sv.ihit):
+                    #    keymat = self.keymat_storage.get(Utils.ipv6_bytes_to_hex_formatted(sv.rhit), 
+                    #        Utils.ipv6_bytes_to_hex_formatted(sv.ihit));
+                    #else:
+                    #    keymat = self.keymat_storage.get(Utils.ipv6_bytes_to_hex_formatted(sv.ihit), 
+                    #       Utils.ipv6_bytes_to_hex_formatted(sv.rhit));
+                    keymat = self.keymat_storage.get(Utils.ipv6_bytes_to_hex_formatted(sv.ihit), 
+                        Utils.ipv6_bytes_to_hex_formatted(sv.rhit));
+                    #if not keymat:
+                    #    logging.debug("------ GETING KEYMAT IN CLOSE ------- %s %s %d" % (Utils.ipv6_bytes_to_hex_formatted(sv.ihit), Utils.ipv6_bytes_to_hex_formatted(sv.rhit), sv.is_responder))
+                    #    logging.debug("++++++++++++++++++++++++++++ ERROR INVALID KEYING MATERIAL UPDATE PACKET OUT ++++++++++++++++++++++++++++")
+                    #    keymat = self.keymat_storage.get(Utils.ipv6_bytes_to_hex_formatted(sv.rhit), 
+                    #        Utils.ipv6_bytes_to_hex_formatted(sv.ihit));
                     #if sv.is_responder:
                     #	logging.debug("Reponder's HIT %s " % (Utils.ipv6_bytes_to_hex_formatted(sv.rhit)))
                     #	logging.debug("Initiator's HIT %s " % (Utils.ipv6_bytes_to_hex_formatted(sv.ihit)))
@@ -2605,13 +3108,19 @@ class HIPLib():
                     sv.closing_timeout = time.time() + self.config["general"]["UAL"] + self.config["general"]["MSL"];
                 if time.time() >= sv.update_timeout:
                     sv.update_timeout = time.time() + self.config["general"]["update_timeout_s"];
-                    if Utils.is_hit_smaller(sv.rhit, sv.ihit):
-                        keymat = self.keymat_storage.get(Utils.ipv6_bytes_to_hex_formatted(sv.rhit), 
-                            Utils.ipv6_bytes_to_hex_formatted(sv.ihit));
-                    else:
-                        keymat = self.keymat_storage.get(Utils.ipv6_bytes_to_hex_formatted(sv.ihit), 
-                            Utils.ipv6_bytes_to_hex_formatted(sv.rhit));
-                    
+                    #if Utils.is_hit_smaller(sv.rhit, sv.ihit):
+                    #    keymat = self.keymat_storage.get(Utils.ipv6_bytes_to_hex_formatted(sv.rhit), 
+                    #        Utils.ipv6_bytes_to_hex_formatted(sv.ihit));
+                    #else:
+                    #    keymat = self.keymat_storage.get(Utils.ipv6_bytes_to_hex_formatted(sv.ihit), 
+                    #        Utils.ipv6_bytes_to_hex_formatted(sv.rhit));
+                    keymat = self.keymat_storage.get(Utils.ipv6_bytes_to_hex_formatted(sv.ihit), 
+                        Utils.ipv6_bytes_to_hex_formatted(sv.rhit));
+                    #if not keymat:
+                    #    logging.debug("------ GETING KEYMAT IN UPDATE OUT ------- %s %s %d" % (Utils.ipv6_bytes_to_hex_formatted(sv.ihit), Utils.ipv6_bytes_to_hex_formatted(sv.rhit), sv.is_responder))
+                    #    logging.debug("++++++++++++++++++++++++++++ ERROR INVALID KEYING MATERIAL UPDATE PACKET OUT ++++++++++++++++++++++++++++")
+                    #    keymat = self.keymat_storage.get(Utils.ipv6_bytes_to_hex_formatted(sv.rhit), 
+                    #        Utils.ipv6_bytes_to_hex_formatted(sv.ihit));
                     #if sv.is_responder:
                     #	logging.debug("Reponder's HIT %s " % (Utils.ipv6_bytes_to_hex_formatted(sv.rhit)))
                     #	logging.debug("Initiator's HIT %s " % (Utils.ipv6_bytes_to_hex_formatted(sv.ihit)))
@@ -2632,10 +3141,12 @@ class HIPLib():
                         cipher_alg = self.cipher_storage.get(Utils.ipv6_bytes_to_hex_formatted(sv.ihit), 
                             Utils.ipv6_bytes_to_hex_formatted(sv.rhit));
 
+                    # OUTGOING
                     if sv.is_responder:
                         (aes_key, hmac_key) = Utils.get_keys(keymat, hmac_alg, cipher_alg, sv.rhit, sv.ihit);
                     else:
                         (aes_key, hmac_key) = Utils.get_keys(keymat, hmac_alg, cipher_alg, sv.ihit, sv.rhit);
+                    
                     hmac = HMACFactory.get(hmac_alg, hmac_key);
 
                     hip_update_packet = HIP.UpdatePacket();
@@ -2706,13 +3217,28 @@ class HIPLib():
             elif hip_state.is_i1_sent():
                 if time.time() >= sv.i1_timeout:
                     sv.i1_timeout = time.time() + self.config["general"]["i1_timeout_s"];
+                    
+
                     dh_groups_param = HIP.DHGroupListParameter();
                     dh_groups_param.add_groups(self.config["security"]["supported_DH_groups"]);
 
                     # Create I1 packet
                     hip_i1_packet = HIP.I1Packet();
-                    hip_i1_packet.set_senders_hit(sv.ihit);
-                    hip_i1_packet.set_receivers_hit(sv.rhit);
+                    
+                    if sv.is_responder:
+                        hip_i1_packet.set_senders_hit(sv.rhit);
+                        hip_i1_packet.set_receivers_hit(sv.ihit);
+                        #sv.ihit = sv.rhit
+                        #sv.rhit = sv.ihit
+                        logging.debug("Source HIT %s " % (Utils.ipv6_bytes_to_hex_formatted(sv.rhit)))
+                        logging.debug("Destination HIT %s " % (Utils.ipv6_bytes_to_hex_formatted(sv.ihit)))
+                    else:
+                        hip_i1_packet.set_senders_hit(sv.ihit);
+                        hip_i1_packet.set_receivers_hit(sv.rhit);
+                        logging.debug("Source HIT %s " % (Utils.ipv6_bytes_to_hex_formatted(sv.ihit)))
+                        logging.debug("Destination HIT %s " % (Utils.ipv6_bytes_to_hex_formatted(sv.rhit)))
+
+                    #sv.is_responder = False;
                     hip_i1_packet.set_next_header(HIP.HIP_IPPROTO_NONE);
                     hip_i1_packet.set_version(HIP.HIP_VERSION);
                     hip_i1_packet.add_parameter(dh_groups_param);
@@ -2744,13 +3270,16 @@ class HIPLib():
                     logging.debug("Re-sending I1 packet from %s" % (src_str));
                     logging.debug("Reponder's HIT %s " % (Utils.ipv6_bytes_to_hex_formatted(sv.rhit)))
                     logging.debug("Initiator's HIT %s " % (Utils.ipv6_bytes_to_hex_formatted(sv.ihit)))
+                    logging.debug("I2 packet buffer------------")
+                    logging.debug(ipv4_packet.get_buffer())
 
                     #hip_socket.sendto(bytearray(ipv4_packet.get_buffer()), (dst_str.strip(), 0))
                     response.append((bytearray(ipv4_packet.get_buffer()), (dst_str.strip(), 0)))
-                    sv.i1_retries += 1;
+                    
                     if sv.i1_retries > self.config["general"]["i1_retries"]:
                         hip_state.failed();
                         sv.failed_timeout = time.time() + self.config["general"]["failed_timeout"];
+                    sv.i1_retries += 1;
             elif hip_state.is_i2_sent():
                 if sv.i2_timeout <= time.time():
                     dst_str = Utils.ipv4_bytes_to_string(sv.dst);
@@ -2761,26 +3290,47 @@ class HIPLib():
                     logging.debug("Reponder's HIT %s " % (Utils.ipv6_bytes_to_hex_formatted(sv.rhit)))
                     logging.debug("Initiator's HIT %s " % (Utils.ipv6_bytes_to_hex_formatted(sv.ihit)))
                     #hip_socket.sendto(bytearray(sv.i2_packet.get_buffer()), (dst_str.strip(), 0))
+                    logging.debug("IS SV")
+                    logging.debug(sv)
+                    logging.debug("**************************************************************")
+                    logging.debug(sv.i2_packet)
+                    if not sv.i2_packet:
+                        logging.critical("NO I2 PACKET IN THE MEMORY")
+                    #else:
                     response.append((bytearray(sv.i2_packet.get_buffer()), (dst_str.strip(), 0)))
-                    sv.i2_retries += 1;
+                    
+                    #if sv.is_responder:
+                    #    sv.ihit = sv.rhit
+                    #    sv.rhit = sv.ihit
+
+                    #sv.is_responder = False;
+
                     if sv.i2_retries > self.config["general"]["i2_retries"]:
                         hip_state.failed();
                         sv.failed_timeout = time.time() + self.config["general"]["failed_timeout"];
                         return response;
                     sv.i2_timeout = time.time() + self.config["general"]["i2_timeout_s"];
+                    sv.i2_retries += 1;
             elif hip_state.is_r2_sent():
                 if sv.ec_complete_timeout <= time.time():
                     logging.debug("EC timeout. Moving to established state...");
                     hip_state.established();
             elif hip_state.is_closing():
                 if sv.closing_timeout <= time.time():
-                    if Utils.is_hit_smaller(sv.rhit, sv.ihit):
-                        keymat = self.keymat_storage.get(Utils.ipv6_bytes_to_hex_formatted(sv.rhit), 
-                            Utils.ipv6_bytes_to_hex_formatted(sv.ihit));
-                    else:
-                        keymat = self.keymat_storage.get(Utils.ipv6_bytes_to_hex_formatted(sv.ihit), 
-                            Utils.ipv6_bytes_to_hex_formatted(sv.rhit));
+                    #if Utils.is_hit_smaller(sv.rhit, sv.ihit):
+                    #    keymat = self.keymat_storage.get(Utils.ipv6_bytes_to_hex_formatted(sv.rhit), 
+                    #        Utils.ipv6_bytes_to_hex_formatted(sv.ihit));
+                    #else:
+                    #    keymat = self.keymat_storage.get(Utils.ipv6_bytes_to_hex_formatted(sv.ihit), 
+                    #        Utils.ipv6_bytes_to_hex_formatted(sv.rhit));
 
+                    keymat = self.keymat_storage.get(Utils.ipv6_bytes_to_hex_formatted(sv.ihit), 
+                        Utils.ipv6_bytes_to_hex_formatted(sv.rhit));
+                    #if not keymat:
+                    #    logging.debug("------ GETING KEYMAT IN CLOSE OUT ------- %s %s %d" % (Utils.ipv6_bytes_to_hex_formatted(sv.ihit), Utils.ipv6_bytes_to_hex_formatted(sv.rhit), sv.is_responder))
+                    #    logging.debug("++++++++++++++++++++++++++++ ERROR INVALID KEYING MATERIAL CLOSE PACKET OUT++++++++++++++++++++++++++++")
+                    #    keymat = self.keymat_storage.get(Utils.ipv6_bytes_to_hex_formatted(sv.rhit), 
+                    #        Utils.ipv6_bytes_to_hex_formatted(sv.ihit));
                     #if sv.is_responder:
                     #	logging.debug("Reponder's HIT %s " % (Utils.ipv6_bytes_to_hex_formatted(sv.rhit)))
                     #	logging.debug("Initiator's HIT %s " % (Utils.ipv6_bytes_to_hex_formatted(sv.ihit)))
@@ -2800,7 +3350,7 @@ class HIPLib():
                         #hmac_alg  = HIT.get_responders_oga_id(sv.rhit);
                         cipher_alg = self.cipher_storage.get(Utils.ipv6_bytes_to_hex_formatted(sv.ihit), 
                             Utils.ipv6_bytes_to_hex_formatted(sv.rhit));
-
+                    # OUTGOING
                     if sv.is_responder:
                         (aes_key, hmac_key) = Utils.get_keys(keymat, hmac_alg, cipher_alg, sv.rhit, sv.ihit);
                     else:
@@ -2808,10 +3358,22 @@ class HIPLib():
 
                     logging.debug("HMAC algorithm %d" % (hmac_alg));
                     hmac = HMACFactory.get(hmac_alg, hmac_key);
-
+                    
                     hip_close_packet = HIP.ClosePacket();
-                    hip_close_packet.set_senders_hit(sv.ihit);
-                    hip_close_packet.set_receivers_hit(sv.rhit);
+
+                    if sv.is_responder:
+                        hip_close_packet.set_senders_hit(sv.rhit);
+                        hip_close_packet.set_receivers_hit(sv.ihit);
+                        logging.debug("Source HIT %s " % (Utils.ipv6_bytes_to_hex_formatted(sv.rhit)))
+                        logging.debug("Destination HIT %s " % (Utils.ipv6_bytes_to_hex_formatted(sv.ihit)))
+                    else:
+                        hip_close_packet.set_senders_hit(sv.ihit);
+                        hip_close_packet.set_receivers_hit(sv.rhit);
+                        logging.debug("Source HIT %s " % (Utils.ipv6_bytes_to_hex_formatted(sv.ihit)))
+                        logging.debug("Destination HIT %s " % (Utils.ipv6_bytes_to_hex_formatted(sv.rhit)))
+
+                    #hip_close_packet.set_senders_hit(sv.ihit);
+                    #hip_close_packet.set_receivers_hit(sv.rhit);
                     hip_close_packet.set_next_header(HIP.HIP_IPPROTO_NONE);
                     hip_close_packet.set_version(HIP.HIP_VERSION);
                     hip_close_packet.set_length(HIP.HIP_DEFAULT_PACKET_LENGTH);

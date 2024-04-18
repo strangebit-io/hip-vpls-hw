@@ -45,6 +45,9 @@ In folder hip-vpls-hw perform the following (generate keys, edit the files):
 - update the rules file (update the firewall rules)
 - in config.py you need to select proper options (change the CE facing interface, public source IP address, change algorithms)
 
+
+First make sure that the SHA2 and AES libraries are compiled for the nanoPI R2S. And then follow the instructions below.
+
 Next deploy the service:
 
 ```

@@ -56,6 +56,8 @@ The AES library for the Intel CPU:
 
 https://github.com/dmitriykuptsov/hw-crypto-aes-ni
 
+Copy the compiled libraries to symmetric crypto folder and then deploy the system.
+
 Next deploy the service:
 
 ```

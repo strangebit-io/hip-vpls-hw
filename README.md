@@ -46,7 +46,15 @@ In folder hip-vpls-hw perform the following (generate keys, edit the files):
 - in config.py you need to select proper options (change the CE facing interface, public source IP address, change algorithms)
 
 
-First make sure that the SHA2 and AES libraries are compiled for the nanoPI R2S. And then follow the instructions below.
+First make sure that the SHA2 and AES libraries are compiled for the nanoPI R2S. And then follow the instructions below. But better run it on Intel CPU with NI instructions. 
+
+The SHA2 library for the Intel CPU:
+
+https://github.com/dmitriykuptsov/hw-crypto-sha2-ni
+
+The AES library for the Intel CPU:
+
+https://github.com/dmitriykuptsov/hw-crypto-aes-ni
 
 Next deploy the service:
 
